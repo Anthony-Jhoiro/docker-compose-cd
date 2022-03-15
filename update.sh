@@ -166,7 +166,7 @@ for delettedFile in "${delettedFiles[@]}"; do
     SUCCESS "Successfully deletted $delettedFile !"
 done
 
-git pull
+git pull > /dev/null
 checkResult "Pull repository"
 
 # Docker compose up files
