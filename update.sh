@@ -52,7 +52,7 @@ _log_and_notify() {
     ;;
   esac
   echo "[$date_time][$level] $msg"
-  PAYLOAD="{ \"attachments\": [{ \"color\": \"$slack_color\", \"fields\": [{ \"title\": \"$SLACK_TITLE\", \"value\": \"$msg\" }]}] }"
+  local PAYLOAD="{ \"attachments\": [{ \"color\": \"$slack_color\", \"fields\": [{ \"title\": \"$SLACK_TITLE\", \"value\": \"$msg\" }]}] }"
   curl -X POST --silent \
     -H 'Content-type: application/json; charset=utf-8' \
     --data "$PAYLOAD" \
@@ -87,9 +87,13 @@ function ERROR() {
 	fi
 }
 
+#############################################
+# UTILS
+#############################################
+
 function checkResult() {
-  status=$?
-  message=$1
+  local status=$?
+  local message=$1
   if [ "$status" == "0" ]; then
     DEBUG "$message"
   else
@@ -99,7 +103,7 @@ function checkResult() {
 }
 
 function filterDockerComposeFiles() {
-  arr=()
+  local arr=()
   for changedFile in $1; do
     if [[ $changedFile =~ docker-compose\.ya?ml$ ]]; then
       arr+=("$changedFile")
@@ -108,11 +112,11 @@ function filterDockerComposeFiles() {
   echo arr
 }
 
-getStatus() {
+function getStatus() {
     echo "$1" | cut -f 1
 }
 
-getFileName() {
+function getFileName() {
     echo "$1" | cut -f 2
 }
 
