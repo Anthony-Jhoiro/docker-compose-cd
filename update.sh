@@ -1,31 +1,109 @@
 #!/bin/bash
 REMOTE_NAME=origin
-REMOTE_BRANCH=master
-LOCAL_BRANCH=master
+REMOTE_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+LOCAL_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
 SLACK_WEBHOOK=YOUR_SLACK_WEBHOOK
 SLACK_TITLE="Docker Deployment"
 
-notify() {
-  message="$1"
-  echo "=> $message"
-  docker run --rm -e SLACK_WEBHOOK=$SLACK_WEBHOOK -e SLACK_TITLE="$SLACK_TITLE" -e SLACK_MESSAGE="$message"  technosophos/slack-notify
+# Set the slack alert level be DEBUG | SUCCESS | ERROR | NONE
+SLACK_ALERT_LEVEL="SUCCESS"
+
+
+#############################################
+# LOGGER
+#############################################
+
+
+LOG_LEVEL_DECIMAL=0
+case "$SLACK_ALERT_LEVEL" in
+  DEBUG)
+    LOG_LEVEL_DECIMAL=3
+  ;;
+  SUCCESS)
+    LOG_LEVEL_DECIMAL=2
+  ;;
+  ERROR)
+    LOG_LEVEL_DECIMAL=1
+  ;;
+esac
+   
+_log() {
+  local date_time msg level slack_color
+  date_time=$(date +"%Y/%m/%d %H:%M:%S")
+  msg="$1"
+  level="${2-${FUNCNAME[1]}}"
+  echo "[$date_time][$level] $msg"
+}
+_log_and_notify() {
+  local date_time msg level slack_color
+  date_time=$(date +"%Y/%m/%d %H:%M:%S")
+  msg="$1"
+  level="${2-${FUNCNAME[1]}}"
+  case "$level" in
+    SUCCESS)
+      slack_color="#84cc16"
+      ;;
+    DEBUG)
+      slack_color="#0ea5e9"
+      ;;
+    *)
+      slack_color="#ef4444"
+    ;;
+  esac
+  echo "[$date_time][$level] $msg"
+  local PAYLOAD="{ \"attachments\": [{ \"color\": \"$slack_color\", \"fields\": [{ \"title\": \"$SLACK_TITLE\", \"value\": \"$msg\" }]}] }"
+  curl -X POST --silent \
+    -H 'Content-type: application/json; charset=utf-8' \
+    --data "$PAYLOAD" \
+    "$SLACK_WEBHOOK" 1>/dev/null
 }
 
-function checkResult() {
-  status=$?
-  message=$1
-  if [ "$status" == "0" ]; then
-    echo "[SUCCESS] $message"
+function DEBUG() {
+	if [[ "$LOG_LEVEL_DECIMAL" -ge "3" ]]
+	then
+    _log_and_notify "$1"
   else
-    echo "[ ERROR ] $message"
-    notify "[ ERROR ] $message"
+    _log "$1"
+	fi
+}
+
+function SUCCESS() {
+	if [[ "$LOG_LEVEL_DECIMAL" -ge "2" ]]
+	then
+    _log_and_notify "$1"
+  else
+    _log "$1"
+	fi
+}
+
+
+function ERROR() {
+	if [[ "$LOG_LEVEL_DECIMAL" -ge "1" ]]
+	then
+    _log_and_notify "$1"
+  else
+    _log "$1"
+	fi
+}
+
+#############################################
+# UTILS
+#############################################
+
+function checkResult() {
+  local status=$?
+  local message=$1
+  if [ "$status" == "0" ]; then
+    DEBUG "$message"
+  else
+    ERROR "$message"
     exit 1
   fi
 }
 
 function filterDockerComposeFiles() {
-  arr=()
+  local arr=()
   for changedFile in $1; do
     if [[ $changedFile =~ docker-compose\.ya?ml$ ]]; then
       arr+=("$changedFile")
@@ -34,25 +112,23 @@ function filterDockerComposeFiles() {
   echo arr
 }
 
-getStatus() {
+function getStatus() {
     echo "$1" | cut -f 1
 }
 
-getFileName() {
+function getFileName() {
     echo "$1" | cut -f 2
 }
 
-
-
-git remote update
+git remote update > /dev/null
 checkResult "Update Remote"
 
 if [ "$(git rev-parse HEAD)" == "$(git rev-parse @{u})" ]; then
-  echo "No changes"
+  DEBUG "No changes"
   exit 0
 fi
 
-echo "Changes detected"
+DEBUG "Changes detected"
 
 changedFiles=$(git diff --name-status $LOCAL_BRANCH $REMOTE_NAME/$REMOTE_BRANCH)
 checkResult "Update Remote"
@@ -76,28 +152,34 @@ while IFS= read -r changedFile; do
   fi
 done <<< "$changedFiles"
 
-echo "Deleted files"
-echo "${delettedFiles[@]}"
+DEBUG "Deleted files"
+DEBUG "${delettedFiles[@]}"
 
-echo "Updated files"
-echo "${updatedFiles[@]}"
+DEBUG "Updated files"
+DEBUG "${updatedFiles[@]}"
 
 
 # Docker compose down files
 for delettedFile in "${delettedFiles[@]}"; do
     docker-compose -f "$delettedFile" down
     checkResult "DOWN $delettedFile"
-    notify "Successfully deletted $delettedFile !"
+    SUCCESS "Successfully deletted $delettedFile !"
 done
 
-git pull
+git pull > /dev/null
 checkResult "Pull repository"
 
 # Docker compose up files
 for updatedFile in "${updatedFiles[@]}"; do
-    docker-compose -f "$updatedFile" up -d
-    checkResult "UP $updatedFile"
-    notify "Successfully deploy $updatedFile !"
+    dir=$(dirname "$updatedFile")
+
+    if [ -f "./$dir/.env.example" ] && [ ! -f "./$dir/.env" ]; then
+        ERROR ".env file needed for $dir, deploy stoped"
+    else
+        docker compose -f "$updatedFile" up -d
+        checkResult "UP $updatedFile"
+        SUCCESS "Successfully deploy $updatedFile !"
+    fi
 done
 
 
