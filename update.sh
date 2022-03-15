@@ -167,9 +167,15 @@ checkResult "Pull repository"
 
 # Docker compose up files
 for updatedFile in "${updatedFiles[@]}"; do
-    docker-compose -f "$updatedFile" up -d
-    checkResult "UP $updatedFile"
-    SUCCESS "Successfully deploy $updatedFile !"
+    dir=$(dirname "$updatedFile")
+
+    if [ -f "./$dir/.env.example" ] && [ ! -f "./$dir/.env" ]; then
+        ERROR ".env file needed for $dir, deploy stoped"
+    else
+        docker compose -f "$updatedFile" up -d
+        checkResult "UP $updatedFile"
+        SUCCESS "Successfully deploy $updatedFile !"
+    fi
 done
 
 
